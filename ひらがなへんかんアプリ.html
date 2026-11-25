@@ -1,0 +1,1505 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>こえで ひらがな へんかん アプリ</title>
+
+  <!-- Tailwind CSS の読み込み -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Google Fonts：小学1年生の学習字形に忠実な BIZ UDPGothic と丸ゴシック -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet" />
+
+  <!-- 日本語形態素解析ライブラリ kuromoji.js（スタンドアロン漢字→ひらがな変換用） -->
+  <script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js" id="kuromoji-script"></script>
+
+  <style>
+    /* アプリ全体の基本フォント（やさしく親しみやすい丸ゴシック） */
+    body {
+      font-family: 'Zen Maru Gothic', 'BIZ UDPGothic', sans-serif;
+      background-color: #FFFDF7;
+      color: #1E293B;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ひらがな表示カード内のフォント（小学校の教科書に近い「き」「さ」「そ」「り」の字形） */
+    .hiragana-font {
+      font-family: 'BIZ UDPGothic', sans-serif;
+      font-feature-settings: "palt" 0;
+    }
+
+    /* よこがきスタイル */
+    .writing-horizontal {
+      writing-mode: horizontal-tb;
+      line-height: 1.8;
+      letter-spacing: 0.08em;
+    }
+
+    /* たてがきスタイル */
+    .writing-vertical {
+      writing-mode: vertical-rl;
+      text-orientation: upright;
+      line-height: 1.9;
+      letter-spacing: 0.12em;
+    }
+
+    /* かみのデザイン1：まっしろ */
+    .paper-white {
+      background-color: #FFFFFF;
+      border: 3px solid #CBD5E1;
+    }
+
+    /* かみのデザイン2：こくごノート風（マス目・リーダー線） */
+    .paper-notebook {
+      background-color: #FFFFFF;
+      border: 4px solid #34D399;
+      background-image:
+        linear-gradient(to right, rgba(16, 185, 129, 0.22) 1.5px, transparent 1.5px),
+        linear-gradient(to bottom, rgba(16, 185, 129, 0.22) 1.5px, transparent 1.5px),
+        linear-gradient(to right, transparent 49.5%, rgba(16, 185, 129, 0.12) 49.5%, rgba(16, 185, 129, 0.12) 50.5%, transparent 50.5%),
+        linear-gradient(to bottom, transparent 49.5%, rgba(16, 185, 129, 0.12) 49.5%, rgba(16, 185, 129, 0.12) 50.5%, transparent 50.5%);
+      background-size: 48px 48px, 48px 48px, 48px 48px, 48px 48px;
+      background-position: center center;
+    }
+
+    /* かみのデザイン3：かわいいわく */
+    .paper-cute {
+      background: linear-gradient(135deg, #FFFBEB 0%, #FFF1F2 50%, #F0FDF4 100%);
+      border: 6px dashed #F472B6;
+      box-shadow: inset 0 0 0 6px #FFFFFF;
+    }
+
+    /* 録音中の波紋アニメーション */
+    @keyframes pulse-ring {
+      0% {
+        transform: scale(0.96);
+        opacity: 0.75;
+      }
+      70% {
+        transform: scale(1.16);
+        opacity: 0;
+      }
+      100% {
+        transform: scale(1.16);
+        opacity: 0;
+      }
+    }
+
+    .mic-pulse::before {
+      content: '';
+      position: absolute;
+      inset: -8px;
+      border-radius: 9999px;
+      background-color: #F43F5E;
+      z-index: -1;
+      animation: pulse-ring 1.5s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+    }
+
+    /* 録音中の波形バーアニメーション */
+    @keyframes wave-bounce {
+      0%, 100% {
+        transform: scaleY(0.35);
+      }
+      50% {
+        transform: scaleY(1);
+      }
+    }
+
+    .wave-bar {
+      animation: wave-bounce 0.9s ease-in-out infinite;
+      transform-origin: center;
+    }
+    .wave-bar:nth-child(2) { animation-delay: 0.15s; }
+    .wave-bar:nth-child(3) { animation-delay: 0.3s; }
+    .wave-bar:nth-child(4) { animation-delay: 0.45s; }
+    .wave-bar:nth-child(5) { animation-delay: 0.2s; }
+
+    /* スクショモード時のフルスクリーン表示 */
+    body.screenshot-active {
+      background-color: #F1F5F9;
+      overflow-x: hidden;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col selection:bg-amber-200">
+
+  <!-- やさしいお知らせトースト表示領域 -->
+  <div id="toast-container" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none flex flex-col items-center gap-2 w-11/12 max-w-md"></div>
+
+  <!-- スクショモード専用：「もどる」ボタン（通常時は非表示） -->
+  <div id="screenshot-exit-bar" class="hidden fixed top-4 left-4 z-40">
+    <button
+      id="exit-screenshot-btn"
+      type="button"
+      class="flex items-center gap-2 px-5 py-3 rounded-full bg-slate-800/85 hover:bg-slate-800 text-white text-base font-black shadow-lg backdrop-blur-sm transition active:scale-95 cursor-pointer"
+    >
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+      </svg>
+      <span>もどる</span>
+    </button>
+  </div>
+
+  <!-- ヘッダー（スクショモード時は非表示） -->
+  <header id="app-header" class="w-full bg-gradient-to-r from-sky-100 via-amber-50 to-pink-100 border-b-2 border-amber-200/80 py-3.5 px-4 shadow-sm">
+    <div class="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2.5">
+      <div class="flex items-center gap-3">
+        <div class="w-11 h-11 rounded-2xl bg-amber-400 text-white flex items-center justify-center shadow-sm text-2xl font-black select-none">
+          あ
+        </div>
+        <div>
+          <h1 class="text-xl sm:text-2xl font-black text-slate-800 tracking-wide">
+            こえで ひらがな へんかん
+          </h1>
+          <p class="text-xs sm:text-sm font-bold text-slate-600">
+            おはなしした ことばが みんな ひらがなに なるよ！
+          </p>
+        </div>
+      </div>
+
+      <!-- 辞書ステータスバッジ（kuromoji読み込み状態を表示） -->
+      <div
+        id="dict-status-badge"
+        class="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-100 border border-amber-300 text-amber-900 text-xs sm:text-sm font-bold shadow-sm transition-all"
+      >
+        <span id="dict-spinner" class="inline-block w-3.5 h-3.5 border-2 border-amber-600 border-t-transparent rounded-full animate-spin"></span>
+        <span id="dict-check" class="hidden text-emerald-600 font-black">✔</span>
+        <span id="dict-status-text">じしょを よみこみちゅう…</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- メインコンテンツ -->
+  <main id="app-main" class="flex-1 w-full max-w-4xl mx-auto px-4 py-5 sm:py-6 flex flex-col gap-6">
+
+    <!-- セクション1：音声入力 ＆ テキスト入力エリア（スクショモード時は非表示） -->
+    <section id="input-section" class="bg-white rounded-3xl p-5 sm:p-6 shadow-md border-2 border-sky-100 flex flex-col gap-4">
+
+      <!-- 大きな録音ボタン ＆ 録音中ステータス表示 -->
+      <div class="flex flex-col items-center justify-center gap-3 pt-1">
+        <div class="relative z-10">
+          <button
+            id="mic-btn"
+            type="button"
+            class="relative flex items-center justify-center gap-3 px-8 py-4 sm:px-10 sm:py-5 rounded-full bg-gradient-to-b from-rose-400 to-rose-500 hover:from-rose-500 hover:to-rose-600 text-white font-black text-xl sm:text-2xl shadow-lg shadow-rose-200 transition-all active:scale-95 cursor-pointer"
+          >
+            <!-- マイクアイコン（待機中） -->
+            <svg id="mic-icon" class="w-7 h-7 sm:w-8 sm:h-8" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+            </svg>
+            <!-- 停止アイコン（録音中） -->
+            <svg id="stop-icon" class="hidden w-7 h-7 sm:w-8 sm:h-8" fill="currentColor" viewBox="0 0 24 24">
+              <rect x="5" y="5" width="14" height="14" rx="3" />
+            </svg>
+            <span id="mic-btn-text">はなす</span>
+          </button>
+        </div>
+
+        <!-- 録音中の波形アニメーション ＆ 経過時間タイマー -->
+        <div id="recording-indicator" class="hidden flex flex-col items-center gap-2 bg-rose-50 border-2 border-rose-200 rounded-2xl px-5 py-3 w-full max-w-lg">
+          <div class="flex items-center justify-center gap-3">
+            <!-- 波形バー -->
+            <div class="flex items-center gap-1 h-6" aria-hidden="true">
+              <span class="wave-bar w-1.5 h-6 bg-rose-500 rounded-full"></span>
+              <span class="wave-bar w-1.5 h-6 bg-rose-500 rounded-full"></span>
+              <span class="wave-bar w-1.5 h-6 bg-rose-500 rounded-full"></span>
+              <span class="wave-bar w-1.5 h-6 bg-rose-500 rounded-full"></span>
+              <span class="wave-bar w-1.5 h-6 bg-rose-500 rounded-full"></span>
+            </div>
+            <span class="text-rose-700 font-black text-base sm:text-lg">ろくおんちゅう</span>
+            <span id="recording-timer" class="px-2.5 py-0.5 rounded-lg bg-rose-600 text-white font-mono font-bold text-sm sm:text-base">00:00</span>
+          </div>
+          <p class="text-xs sm:text-sm font-black text-rose-700 text-center">
+            とめる を おすまで ずっと きいているよ！ ゆっくり はなしてね
+          </p>
+        </div>
+
+        <!-- 待機中の案内テキスト -->
+        <p id="mic-idle-hint" class="text-sm sm:text-base font-bold text-slate-600 text-center">
+          「はなす」を おしてから おはなししてね（つづきから たせるよ）
+        </p>
+      </div>
+
+      <!-- テキスト編集エリア -->
+      <div class="flex flex-col gap-2">
+        <div class="flex items-center justify-between">
+          <label for="source-textarea" class="text-sm sm:text-base font-black text-slate-700 flex items-center gap-2">
+            <span class="inline-block w-3 h-3 rounded-full bg-sky-400"></span>
+            おはなしした もじ（じぶんでも なおせるよ）
+          </label>
+          <button
+            id="clear-btn"
+            type="button"
+            class="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs sm:text-sm font-bold transition active:scale-95 cursor-pointer"
+          >
+            けす
+          </button>
+        </div>
+
+        <textarea
+          id="source-textarea"
+          rows="2"
+          placeholder="ここに おはなしした ことばが はいるよ。キーボードでも うてるよ！"
+          class="w-full rounded-2xl border-2 border-sky-200 focus:border-sky-400 focus:ring-4 focus:ring-sky-100 p-3.5 text-base sm:text-lg font-medium text-slate-800 bg-sky-50/30 resize-y outline-none transition"
+        >今日、私は学校でアサガオの観察をしました！</textarea>
+
+        <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <span id="convert-mode-label" class="text-xs sm:text-sm font-bold text-slate-500">
+            いれると すぐに ひらがなに なるよ
+          </span>
+
+          <button
+            id="convert-btn"
+            type="button"
+            class="ml-auto flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-sky-500 hover:bg-sky-600 text-white font-black text-sm sm:text-base shadow-sm transition active:scale-95 cursor-pointer"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+            </svg>
+            <span>ひらがなにする</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- セクション2：できあがった ひらがな カード（スクショ・画像保存対象） -->
+    <section id="card-wrapper-section" class="flex flex-col gap-3">
+      <div id="card-header-bar" class="flex items-center justify-between px-1">
+        <h2 class="text-base sm:text-lg font-black text-slate-800 flex items-center gap-2">
+          <span class="inline-block w-3 h-3 rounded-full bg-amber-400"></span>
+          できあがった ひらがな
+        </h2>
+        <span class="text-xs font-bold text-slate-500">
+          スクショや がぞうほぞんで つかえるよ
+        </span>
+      </div>
+
+      <!-- プレビューカード -->
+      <div
+        id="hiragana-card"
+        class="relative w-full min-h-[260px] sm:min-h-[320px] rounded-3xl p-6 sm:p-10 paper-white shadow-lg flex items-center justify-center transition-all duration-200 overflow-x-auto"
+      >
+        <!-- かわいいわく用 四隅の飾りイラスト -->
+        <div id="cute-decorations" class="hidden pointer-events-none select-none">
+          <!-- 左上：星 -->
+          <svg class="w-9 h-9 text-amber-300 absolute top-4 left-4" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l7.1-1.01L12 2z" />
+          </svg>
+          <!-- 右上：ハート -->
+          <svg class="w-8 h-8 text-pink-300 absolute top-4 right-4" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+          </svg>
+          <!-- 左下：お花 -->
+          <svg class="w-8 h-8 text-emerald-300 absolute bottom-4 left-4" fill="currentColor" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="3.5" />
+            <circle cx="12" cy="5.5" r="3" />
+            <circle cx="12" cy="18.5" r="3" />
+            <circle cx="5.5" cy="12" r="3" />
+            <circle cx="18.5" cy="12" r="3" />
+          </svg>
+          <!-- 右下：星 -->
+          <svg class="w-9 h-9 text-sky-300 absolute bottom-4 right-4" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l7.1-1.01L12 2z" />
+          </svg>
+        </div>
+
+        <!-- ひらがな出力テキスト -->
+        <div
+          id="hiragana-output"
+          class="hiragana-font writing-horizontal font-bold text-slate-900 break-words w-full text-center select-all whitespace-pre-wrap transition-all duration-150"
+          style="font-size: 36px;"
+        >きょう、 わたしは がっこうで あさがおの かんさつを しました！</div>
+      </div>
+
+      <!-- スクショ・画像保存・コピーボタンバー（スクショモード時は非表示） -->
+      <div id="action-bar" class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+        <!-- スクショモードボタン -->
+        <button
+          id="screenshot-mode-btn"
+          type="button"
+          class="flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-amber-400 hover:bg-amber-500 text-slate-900 font-black text-base shadow-md shadow-amber-200/70 transition active:scale-95 cursor-pointer"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+          </svg>
+          <span>スクショモード</span>
+        </button>
+
+        <!-- がぞうで ほぞん ボタン（自前Canvas描画エンジン） -->
+        <button
+          id="save-image-btn"
+          type="button"
+          class="flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black text-base shadow-md shadow-emerald-200/70 transition active:scale-95 cursor-pointer"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+          </svg>
+          <span>がぞうで ほぞん</span>
+        </button>
+
+        <!-- もじを コピー ボタン -->
+        <button
+          id="copy-text-btn"
+          type="button"
+          class="flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-white hover:bg-slate-50 text-slate-700 border-2 border-slate-200 font-bold text-base shadow-sm transition active:scale-95 cursor-pointer"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" />
+          </svg>
+          <span>もじを コピー</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- セクション3：カスタマイズパネル（スクショモード時は非表示） -->
+    <section id="customize-section" class="bg-white rounded-3xl p-5 sm:p-6 shadow-md border-2 border-amber-100 flex flex-col gap-5">
+      <h2 class="text-base sm:text-lg font-black text-slate-800 flex items-center gap-2">
+        <span class="inline-block w-3 h-3 rounded-full bg-pink-400"></span>
+        カードのみためを かえる
+      </h2>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- 1. もじの おおきさ（ちいさい・ふつう・おおきい・とくだい） -->
+        <div class="bg-sky-50/70 rounded-2xl p-4 border border-sky-100 flex flex-col gap-2.5">
+          <span class="text-sm font-black text-slate-700">1. もじの おおきさ</span>
+          <div class="grid grid-cols-4 gap-2">
+            <button type="button" data-size="24" class="size-btn py-2.5 px-1 rounded-xl bg-white hover:bg-sky-100 border-2 border-sky-200 text-xs sm:text-sm font-bold text-slate-700 transition cursor-pointer">
+              ちいさい
+            </button>
+            <button type="button" data-size="36" class="size-btn py-2.5 px-1 rounded-xl bg-sky-500 text-white border-2 border-sky-500 text-xs sm:text-sm font-black shadow-sm transition cursor-pointer">
+              ふつう
+            </button>
+            <button type="button" data-size="50" class="size-btn py-2.5 px-1 rounded-xl bg-white hover:bg-sky-100 border-2 border-sky-200 text-xs sm:text-sm font-bold text-slate-700 transition cursor-pointer">
+              おおきい
+            </button>
+            <button type="button" data-size="66" class="size-btn py-2.5 px-1 rounded-xl bg-white hover:bg-sky-100 border-2 border-sky-200 text-xs sm:text-sm font-bold text-slate-700 transition cursor-pointer">
+              とくだい
+            </button>
+          </div>
+        </div>
+
+        <!-- 2. わかちがき（あり / なし） -->
+        <div class="bg-emerald-50/70 rounded-2xl p-4 border border-emerald-100 flex flex-col gap-2.5">
+          <span class="text-sm font-black text-slate-700">2. わかちがき（スペースを いれる）</span>
+          <div class="grid grid-cols-2 gap-2.5">
+            <button
+              id="wakachi-on-btn"
+              type="button"
+              class="py-2.5 px-3 rounded-xl bg-emerald-500 text-white border-2 border-emerald-500 text-sm font-black shadow-sm transition cursor-pointer"
+            >
+              あり（よみやすい）
+            </button>
+            <button
+              id="wakachi-off-btn"
+              type="button"
+              class="py-2.5 px-3 rounded-xl bg-white hover:bg-emerald-100/70 text-slate-700 border-2 border-emerald-200 text-sm font-bold transition cursor-pointer"
+            >
+              なし（つなげる）
+            </button>
+          </div>
+        </div>
+
+        <!-- 3. むき（よこがき / たてがき） -->
+        <div class="bg-amber-50/70 rounded-2xl p-4 border border-amber-100 flex flex-col gap-2.5">
+          <span class="text-sm font-black text-slate-700">3. むき（よこがき / たてがき）</span>
+          <div class="grid grid-cols-2 gap-2.5">
+            <button
+              id="dir-horizontal-btn"
+              type="button"
+              class="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-amber-400 text-slate-900 border-2 border-amber-500 text-sm font-black shadow-sm transition cursor-pointer"
+            >
+              <span>➡️</span>
+              <span>よこがき</span>
+            </button>
+            <button
+              id="dir-vertical-btn"
+              type="button"
+              class="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-white hover:bg-amber-100/70 text-slate-700 border-2 border-amber-200 text-sm font-bold transition cursor-pointer"
+            >
+              <span>⬇️</span>
+              <span>たてがき</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 4. かみの デザイン（まっしろ / こくごノート風 / かわいいわく） -->
+        <div class="bg-pink-50/70 rounded-2xl p-4 border border-pink-100 flex flex-col gap-2.5">
+          <span class="text-sm font-black text-slate-700">4. かみの デザイン</span>
+          <div class="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              data-paper="white"
+              class="paper-btn flex flex-col items-center justify-center gap-1 py-2 px-1.5 rounded-xl bg-pink-500 text-white border-2 border-pink-500 text-xs font-black shadow-sm transition cursor-pointer"
+            >
+              <span class="w-4 h-4 rounded-full bg-white border border-slate-300"></span>
+              <span>まっしろ</span>
+            </button>
+            <button
+              type="button"
+              data-paper="notebook"
+              class="paper-btn flex flex-col items-center justify-center gap-1 py-2 px-1.5 rounded-xl bg-white hover:bg-pink-100/60 text-slate-700 border-2 border-pink-200 text-xs font-bold transition cursor-pointer"
+            >
+              <span class="w-4 h-4 rounded-full bg-emerald-200 border border-emerald-500"></span>
+              <span>こくごノート</span>
+            </button>
+            <button
+              type="button"
+              data-paper="cute"
+              class="paper-btn flex flex-col items-center justify-center gap-1 py-2 px-1.5 rounded-xl bg-white hover:bg-pink-100/60 text-slate-700 border-2 border-pink-200 text-xs font-bold transition cursor-pointer"
+            >
+              <span class="w-4 h-4 rounded-full bg-pink-200 border border-pink-400"></span>
+              <span>かわいいわく</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- フッター（スクショモード時は非表示） -->
+  <footer id="app-footer" class="w-full py-4 px-4 text-center text-xs font-bold text-slate-400">
+    しょうがっこう 1ねんせい がくしゅうしえん アプリ
+  </footer>
+
+  <script>
+    /**
+     * 小学1年生向け「音声入力ひらがな変換ウェブアプリ」スタンドアロン版
+     * 1. kuromoji.js によるブラウザ完結型・高精度形態素解析ひらがな変換（文節わかちがき対応）
+     * 2. Web Speech API + オートリスタート機構による途切れない長時間音声入力
+     * 3. HTML5 <canvas> 自前描画エンジンによる高精細PNG画像保存＆スクショモード
+     */
+
+    // ==========================================
+    // 1. アプリ全体の状態管理
+    // ==========================================
+    const state = {
+      tokenizer: null,          // kuromoji トークナイザインスタンス
+      isDictReady: false,       // 辞書ロード完了フラグ
+      isRecording: false,       // ユーザーが録音モードを開始しているか
+      isManualStop: false,      // ユーザーが「とめる」ボタンを押したか
+      recordingSeconds: 0,      // 録音経過秒数
+      recordingTimerId: null,   // 経過時間タイマーID
+      baseTextBeforeRecord: '', // 録音開始前にテキスト欄にあった文章
+      committedTranscript: '',  // 今回の録音セッションで確定した文章
+      wakachigaki: true,        // わかちがき（あり: true / なし: false）
+      fontSize: 36,             // 文字サイズ（px）
+      direction: 'horizontal',  // 'horizontal' | 'vertical'
+      paperTheme: 'white',      // 'white' | 'notebook' | 'cute'
+      isScreenshotMode: false   // スクショモード状態
+    };
+
+    // ==========================================
+    // 2. DOM要素の参照
+    // ==========================================
+    const el = {
+      header: document.getElementById('app-header'),
+      main: document.getElementById('app-main'),
+      footer: document.getElementById('app-footer'),
+      inputSection: document.getElementById('input-section'),
+      cardHeaderBar: document.getElementById('card-header-bar'),
+      actionBar: document.getElementById('action-bar'),
+      customizeSection: document.getElementById('customize-section'),
+      screenshotExitBar: document.getElementById('screenshot-exit-bar'),
+
+      dictStatusBadge: document.getElementById('dict-status-badge'),
+      dictSpinner: document.getElementById('dict-spinner'),
+      dictCheck: document.getElementById('dict-check'),
+      dictStatusText: document.getElementById('dict-status-text'),
+
+      micBtn: document.getElementById('mic-btn'),
+      micIcon: document.getElementById('mic-icon'),
+      stopIcon: document.getElementById('stop-icon'),
+      micBtnText: document.getElementById('mic-btn-text'),
+      recordingIndicator: document.getElementById('recording-indicator'),
+      recordingTimer: document.getElementById('recording-timer'),
+      micIdleHint: document.getElementById('mic-idle-hint'),
+
+      sourceTextarea: document.getElementById('source-textarea'),
+      clearBtn: document.getElementById('clear-btn'),
+      convertBtn: document.getElementById('convert-btn'),
+      convertModeLabel: document.getElementById('convert-mode-label'),
+
+      hiraganaCard: document.getElementById('hiragana-card'),
+      hiraganaOutput: document.getElementById('hiragana-output'),
+      cuteDecorations: document.getElementById('cute-decorations'),
+
+      sizeBtns: document.querySelectorAll('.size-btn'),
+      wakachiOnBtn: document.getElementById('wakachi-on-btn'),
+      wakachiOffBtn: document.getElementById('wakachi-off-btn'),
+      dirHorizontalBtn: document.getElementById('dir-horizontal-btn'),
+      dirVerticalBtn: document.getElementById('dir-vertical-btn'),
+      paperBtns: document.querySelectorAll('.paper-btn'),
+
+      screenshotModeBtn: document.getElementById('screenshot-mode-btn'),
+      exitScreenshotBtn: document.getElementById('exit-screenshot-btn'),
+      saveImageBtn: document.getElementById('save-image-btn'),
+      copyTextBtn: document.getElementById('copy-text-btn'),
+      toastContainer: document.getElementById('toast-container')
+    };
+
+    // ==========================================
+    // 3. やさしいトースト通知（alert代替）
+    // ==========================================
+    function showToast(message, type = 'info') {
+      const toast = document.createElement('div');
+      const styles = {
+        info: 'bg-sky-600 text-white',
+        success: 'bg-emerald-600 text-white',
+        warning: 'bg-amber-400 text-slate-900',
+        error: 'bg-rose-500 text-white'
+      };
+      toast.className = `${styles[type] || styles.info} px-5 py-3 rounded-2xl shadow-lg font-black text-sm sm:text-base text-center transform transition-all duration-300 opacity-0 -translate-y-2`;
+      toast.textContent = message;
+      el.toastContainer.appendChild(toast);
+
+      requestAnimationFrame(() => {
+        toast.classList.remove('opacity-0', '-translate-y-2');
+      });
+
+      setTimeout(() => {
+        toast.classList.add('opacity-0', '-translate-y-2');
+        setTimeout(() => toast.remove(), 300);
+      }, 2800);
+    }
+
+    // ==========================================
+    // 4. kuromoji.js 辞書の初期化（CDNフォールバック対応）
+    // ==========================================
+    function loadKuromojiDictionary() {
+      const dictUrls = [
+        'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/',
+        'https://unpkg.com/kuromoji@0.1.2/dict/'
+      ];
+
+      function tryBuild(index) {
+        if (index >= dictUrls.length) {
+          // すべてのCDNから辞書を取得できなかった場合（完全オフライン等）
+          el.dictSpinner.classList.add('hidden');
+          el.dictStatusBadge.className = 'flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-orange-100 border border-orange-300 text-orange-900 text-xs sm:text-sm font-bold shadow-sm';
+          el.dictStatusText.textContent = 'かんたん じしょ モード';
+          el.convertModeLabel.textContent = 'ネットに つながると かんじも ひらがなに なるよ';
+          convertAndRender();
+          return;
+        }
+
+        if (typeof kuromoji === 'undefined') {
+          // kuromoji本体スクリプトがまだ読み込めていない場合はunpkgから再ロードを試みる
+          const fallbackScript = document.createElement('script');
+          fallbackScript.src = 'https://unpkg.com/kuromoji@0.1.2/build/kuromoji.js';
+          fallbackScript.onload = () => tryBuild(0);
+          fallbackScript.onerror = () => tryBuild(dictUrls.length);
+          document.head.appendChild(fallbackScript);
+          return;
+        }
+
+        kuromoji.builder({ dicPath: dictUrls[index] }).build((err, tokenizer) => {
+          if (err || !tokenizer) {
+            tryBuild(index + 1);
+            return;
+          }
+
+          // 辞書読み込み成功！
+          state.tokenizer = tokenizer;
+          state.isDictReady = true;
+
+          el.dictSpinner.classList.add('hidden');
+          el.dictCheck.classList.remove('hidden');
+          el.dictStatusBadge.className = 'flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs sm:text-sm font-black shadow-sm';
+          el.dictStatusText.textContent = 'ひらがな じしょ じゅんびOK！';
+          el.convertModeLabel.textContent = 'かんじも カタカナも じどうで ひらがなに なるよ！';
+
+          // すでに入力済みのテキストがあれば即座に高精度ひらがな変換を実行
+          convertAndRender();
+        });
+      }
+
+      tryBuild(0);
+    }
+
+    // ==========================================
+    // 5. 高精度ひらがな変換エンジン（kuromoji + 1年生向け文節わかちがき）
+    // ==========================================
+
+    // カタカナ（ァ〜ヶ）をひらがな（ぁ〜ゖ）へ変換
+    function katakanaToHiragana(str) {
+      if (!str) return '';
+      return str.replace(/[\u30A1-\u30F6]/g, (ch) =>
+        String.fromCharCode(ch.charCodeAt(0) - 0x60)
+      );
+    }
+
+    // 数字文字列を日本語の自然なひらがな読みへ変換（例: "2026" -> "にせんにじゅうろく"）
+    function numberStringToHiragana(numStr) {
+      const normalized = numStr.replace(/[０-９]/g, (s) =>
+        String.fromCharCode(s.charCodeAt(0) - 0xFEE0)
+      );
+      if (!/^\d+$/.test(normalized)) return normalized;
+
+      const n = parseInt(normalized, 10);
+      if (isNaN(n) || normalized.length > 8) {
+        const singleDigits = ['ぜろ', 'いち', 'に', 'さん', 'よん', 'ご', 'ろく', 'なな', 'はち', 'きゅう'];
+        return normalized.split('').map((d) => singleDigits[Number(d)] || d).join('');
+      }
+      if (n === 0) return 'ぜろ';
+
+      const ones = ['', 'いち', 'に', 'さん', 'よん', 'ご', 'ろく', 'なな', 'はち', 'きゅう'];
+      const tens = ['', 'じゅう', 'にじゅう', 'さんじゅう', 'よんじゅう', 'ごじゅう', 'ろくじゅう', 'ななじゅう', 'はちじゅう', 'きゅうじゅう'];
+      const hundreds = ['', 'ひゃく', 'にひゃく', 'さんびゃく', 'よんひゃく', 'ごひゃく', 'ろっぴゃく', 'ななひゃく', 'はっぴゃく', 'きゅうひゃく'];
+      const thousands = ['', 'せん', 'にせん', 'さんぜん', 'よんせん', 'ごせん', 'ろくせん', 'ななせん', 'はっせん', 'きゅうせん'];
+
+      function under10000(val) {
+        const th = Math.floor(val / 1000);
+        const hu = Math.floor((val % 1000) / 100);
+        const te = Math.floor((val % 100) / 10);
+        const on = val % 10;
+        return thousands[th] + hundreds[hu] + tens[te] + ones[on];
+      }
+
+      if (n < 10000) {
+        return under10000(n);
+      }
+      const man = Math.floor(n / 10000);
+      const rest = n % 10000;
+      return under10000(man) + 'まん' + (rest > 0 ? under10000(rest) : '');
+    }
+
+    // アルファベット1文字のひらがな読み（未知の英単語フォールバック用）
+    function alphabetToHiragana(str) {
+      const alphaMap = {
+        A: 'えー', B: 'びー', C: 'しー', D: 'でぃー', E: 'いー', F: 'えふ', G: 'じー',
+        H: 'えいち', I: 'あい', J: 'じぇい', K: 'けー', L: 'える', M: 'えむ', N: 'えぬ',
+        O: 'おー', P: 'ぴー', Q: 'きゅー', R: 'あーる', S: 'えす', T: 'てぃー', U: 'ゆー',
+        V: 'ぶい', W: 'だぶりゅー', X: 'えっくす', Y: 'わい', Z: 'ぜっと'
+      };
+      return str.replace(/[A-Za-zＡ-Ｚａ-ｚ]/g, (ch) => {
+        const half = ch.replace(/[Ａ-Ｚａ-ｚ]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)).toUpperCase();
+        return alphaMap[half] || ch;
+      });
+    }
+
+    // トークン1つを適切なひらがな表記に変換
+    function tokenToHiragana(token) {
+      const surface = token.surface_form || '';
+
+      // 1. 助詞の「は」「へ」「を」は小学校の国語表記として表層形をそのまま維持
+      if (token.pos === '助詞' && (surface === 'は' || surface === 'へ' || surface === 'を')) {
+        return surface;
+      }
+
+      // 2. kuromojiのカタカナ読み（reading）が存在する場合
+      if (token.reading && token.reading !== '*') {
+        return katakanaToHiragana(token.reading);
+      }
+
+      // 3. 読みが登録されていない未知語・数字・記号・英字のフォールバック処理
+      let result = katakanaToHiragana(surface);
+      result = result.replace(/[0-9０-９]+/g, (match) => numberStringToHiragana(match));
+      result = alphabetToHiragana(result);
+      return result;
+    }
+
+    // 小学1年生が読みやすい文節の切れ目かどうかを判定（わかちがき用）
+    function shouldInsertSpaceBefore(token, prevToken) {
+      if (!prevToken) return false;
+
+      const surface = token.surface_form || '';
+      const prevSurface = prevToken.surface_form || '';
+
+      // 改行や空白の前後には重複してスペースを入れない
+      if (/[\r\n\s\u3000]/.test(surface) || /[\r\n\s\u3000]/.test(prevSurface)) {
+        return false;
+      }
+
+      // 句読点・感嘆符・閉じ括弧は前の言葉にくっつける
+      if (token.pos === '記号' && /^[、。！？!?,.\)）」』】〉》〕］｝]/.test(surface)) {
+        return false;
+      }
+
+      // 読点「、」・句点「。」・感嘆符「！」「？」の直後に次の言葉が続くときは1マスあける
+      if (prevToken.pos === '記号' && /^[、。！？!?]/.test(prevSurface)) {
+        return true;
+      }
+
+      // 開き括弧や接頭詞（「お」「ご」「まっ」など）の直後はスペースを入れずにくっつける
+      if (prevToken.pos === '接頭詞' || /^[「『（(【〈《〔［｛]/.test(prevSurface)) {
+        return false;
+      }
+
+      // 助詞・助動詞は前の自立語にくっつける
+      if (token.pos === '助詞' || token.pos === '助動詞') {
+        return false;
+      }
+
+      // 非自立語（「〜ている」「〜てみる」「〜こと」「〜もの」）や接尾辞（「〜さん」「〜たち」「〜月」「〜日」「〜個」）はくっつける
+      if (token.pos_detail_1 === '非自立' || token.pos_detail_1 === '接尾') {
+        return false;
+      }
+
+      // 自立語（名詞・動詞・形容詞・副詞・連体詞・接続詞・感動詞・接頭詞）の前で区切る
+      const independentPos = ['名詞', '動詞', '形容詞', '副詞', '連体詞', '接続詞', '感動詞', '接頭詞'];
+      if (independentPos.includes(token.pos)) {
+        return true;
+      }
+
+      return false;
+    }
+
+    // テキスト全体をひらがなへ変換するメイン関数
+    function convertToHiragana(rawText) {
+      if (!rawText || !rawText.trim()) {
+        return '';
+      }
+
+      // kuromoji辞書が準備完了している場合：形態素解析で高精度変換
+      if (state.isDictReady && state.tokenizer) {
+        // 改行を保持するため行ごとに解析
+        const lines = rawText.split(/\r?\n/);
+        const convertedLines = lines.map((line) => {
+          if (!line.trim()) return '';
+          const tokens = state.tokenizer.tokenize(line);
+          let output = '';
+          let prevToken = null;
+
+          for (const token of tokens) {
+            // 元テキスト内の半角/全角スペースは重複防止のためスキップ（わかちがき設定に従う）
+            if (/^[\s\u3000]+$/.test(token.surface_form)) {
+              continue;
+            }
+
+            if (state.wakachigaki && shouldInsertSpaceBefore(token, prevToken)) {
+              output += ' ';
+            }
+
+            output += tokenToHiragana(token);
+            prevToken = token;
+          }
+
+          return output;
+        });
+
+        return convertedLines.join('\n');
+      }
+
+      // 辞書ロード中の初期フォールバック（カタカナ・数字変換）
+      let fallback = katakanaToHiragana(rawText);
+      fallback = fallback.replace(/[0-9０-９]+/g, (m) => numberStringToHiragana(m));
+      if (state.wakachigaki) {
+        fallback = fallback.replace(/([、。！？])/g, '$1 ').replace(/[ \u3000]+/g, ' ').trim();
+      } else {
+        fallback = fallback.replace(/[ \u3000]+/g, '');
+      }
+      return fallback;
+    }
+
+    // 変換してプレビューカードへ反映
+    function convertAndRender() {
+      const sourceText = el.sourceTextarea.value;
+      if (!sourceText.trim()) {
+        el.hiraganaOutput.textContent = 'ここに ひらがなが でるよ';
+        el.hiraganaOutput.classList.add('text-slate-300');
+        el.hiraganaOutput.classList.remove('text-slate-900');
+        return;
+      }
+
+      const hiraganaText = convertToHiragana(sourceText);
+      el.hiraganaOutput.textContent = hiraganaText;
+      el.hiraganaOutput.classList.remove('text-slate-300');
+      el.hiraganaOutput.classList.add('text-slate-900');
+    }
+
+    // ==========================================
+    // 6. 途切れない長時間音声入力（Web Speech API + オートリスタート）
+    // ==========================================
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+
+    function formatDuration(totalSeconds) {
+      const mins = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+      const secs = String(totalSeconds % 60).padStart(2, '0');
+      return `${mins}:${secs}`;
+    }
+
+    function startRecordingTimer() {
+      stopRecordingTimer();
+      state.recordingSeconds = 0;
+      el.recordingTimer.textContent = '00:00';
+      state.recordingTimerId = setInterval(() => {
+        state.recordingSeconds += 1;
+        el.recordingTimer.textContent = formatDuration(state.recordingSeconds);
+      }, 1000);
+    }
+
+    function stopRecordingTimer() {
+      if (state.recordingTimerId) {
+        clearInterval(state.recordingTimerId);
+        state.recordingTimerId = null;
+      }
+    }
+
+    function updateRecordingUI(active) {
+      if (active) {
+        el.micBtn.classList.add('mic-pulse', 'from-rose-500', 'to-red-600');
+        el.micBtn.classList.remove('from-rose-400', 'to-rose-500');
+        el.micIcon.classList.add('hidden');
+        el.stopIcon.classList.remove('hidden');
+        el.micBtnText.textContent = 'とめる（ろくおんちゅう…）';
+        el.recordingIndicator.classList.remove('hidden');
+        el.micIdleHint.classList.add('hidden');
+      } else {
+        el.micBtn.classList.remove('mic-pulse', 'from-rose-500', 'to-red-600');
+        el.micBtn.classList.add('from-rose-400', 'to-rose-500');
+        el.micIcon.classList.remove('hidden');
+        el.stopIcon.classList.add('hidden');
+        el.micBtnText.textContent = 'はなす';
+        el.recordingIndicator.classList.add('hidden');
+        el.micIdleHint.classList.remove('hidden');
+      }
+    }
+
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.lang = 'ja-JP';
+      recognition.continuous = true;      // 連続音声認識を有効化
+      recognition.interimResults = true;  // 話している途中の暫定結果もリアルタイム取得
+
+      recognition.onresult = (event) => {
+        let interimTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const piece = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            state.committedTranscript += piece;
+          } else {
+            interimTranscript += piece;
+          }
+        }
+
+        // 録音前の既存テキストの後ろにつづきから連結して表示
+        const combined = state.baseTextBeforeRecord + state.committedTranscript + interimTranscript;
+        el.sourceTextarea.value = combined;
+
+        // リアルタイムで即座にひらがな変換してカードへ反映
+        convertAndRender();
+      };
+
+      recognition.onerror = (event) => {
+        // 無音タイムアウト（no-speech）や一時的な中断（aborted）はオートリスタートで継続させる
+        if (event.error === 'no-speech' || event.error === 'aborted') {
+          return;
+        }
+
+        // マイク権限が拒否された場合やマイクが見つからない場合のみ停止する
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          state.isManualStop = true;
+          state.isRecording = false;
+          stopRecordingTimer();
+          updateRecordingUI(false);
+          showToast('マイクを つかう きょかが されていません', 'error');
+        } else if (event.error === 'audio-capture') {
+          state.isManualStop = true;
+          state.isRecording = false;
+          stopRecordingTimer();
+          updateRecordingUI(false);
+          showToast('マイクが みつかりません', 'error');
+        }
+      };
+
+      // ブラウザの無音制限などで自動終了した際、ユーザーが「とめる」を押していない限り即座に再開する
+      recognition.onend = () => {
+        if (state.isRecording && !state.isManualStop) {
+          setTimeout(() => {
+            if (state.isRecording && !state.isManualStop) {
+              try {
+                recognition.start();
+              } catch (e) {
+                // すでに開始処理中の場合は無視
+              }
+            }
+          }, 120);
+        } else {
+          state.isRecording = false;
+          stopRecordingTimer();
+          updateRecordingUI(false);
+          convertAndRender();
+        }
+      };
+    }
+
+    // 録音開始・停止ボタンのクリック処理
+    el.micBtn.addEventListener('click', () => {
+      if (!recognition) {
+        showToast('このブラウザでは おんせいにゅうりょくが つかえないよ。したの わくに もじを いれてね', 'warning');
+        el.sourceTextarea.focus();
+        return;
+      }
+
+      if (state.isRecording) {
+        // ユーザーが「とめる」を押したときの明示的停止
+        state.isManualStop = true;
+        state.isRecording = false;
+        stopRecordingTimer();
+        updateRecordingUI(false);
+        try {
+          recognition.stop();
+        } catch (e) {
+          // すでに停止している場合
+        }
+        showToast('ろくおんを とめたよ！', 'success');
+      } else {
+        // 録音スタート：既存テキストを消さずに後ろからつづきを追加する準備
+        const currentText = el.sourceTextarea.value;
+        // 既存テキストの末尾が空白・句読点・改行でなければ、読みやすくつなぐためスペースを1つ補う
+        if (currentText && !/[\s\u3000、。！？!?]$/.test(currentText)) {
+          state.baseTextBeforeRecord = currentText + ' ';
+        } else {
+          state.baseTextBeforeRecord = currentText;
+        }
+        state.committedTranscript = '';
+        state.isManualStop = false;
+        state.isRecording = true;
+
+        updateRecordingUI(true);
+        startRecordingTimer();
+
+        try {
+          recognition.start();
+        } catch (e) {
+          // 例外発生時はリセット
+          state.isRecording = false;
+          stopRecordingTimer();
+          updateRecordingUI(false);
+        }
+      }
+    });
+
+    // ==========================================
+    // 7. テキスト入力・けす・手動変換ボタン
+    // ==========================================
+    el.sourceTextarea.addEventListener('input', () => {
+      // キーボードで入力・編集したときもリアルタイムで即座にひらがな変換
+      convertAndRender();
+    });
+
+    el.convertBtn.addEventListener('click', () => {
+      convertAndRender();
+      showToast('ひらがなに へんかん したよ！', 'success');
+    });
+
+    el.clearBtn.addEventListener('click', () => {
+      el.sourceTextarea.value = '';
+      state.baseTextBeforeRecord = '';
+      state.committedTranscript = '';
+      convertAndRender();
+      el.sourceTextarea.focus();
+      showToast('もじを ぜんぶ けしたよ', 'info');
+    });
+
+    // ==========================================
+    // 8. カスタマイズ機能（文字サイズ・わかちがき・むき・かみのデザイン）
+    // ==========================================
+
+    // 1. もじの おおきさ（ちいさい・ふつう・おおきい・とくだい）
+    function setFontSize(px) {
+      state.fontSize = Number(px);
+      el.hiraganaOutput.style.fontSize = `${state.fontSize}px`;
+
+      el.sizeBtns.forEach((btn) => {
+        if (Number(btn.dataset.size) === state.fontSize) {
+          btn.className = 'size-btn py-2.5 px-1 rounded-xl bg-sky-500 text-white border-2 border-sky-500 text-xs sm:text-sm font-black shadow-sm transition cursor-pointer';
+        } else {
+          btn.className = 'size-btn py-2.5 px-1 rounded-xl bg-white hover:bg-sky-100 border-2 border-sky-200 text-xs sm:text-sm font-bold text-slate-700 transition cursor-pointer';
+        }
+      });
+    }
+
+    el.sizeBtns.forEach((btn) => {
+      btn.addEventListener('click', () => setFontSize(btn.dataset.size));
+    });
+
+    // 2. わかちがき（あり / なし）
+    function setWakachigaki(enabled) {
+      state.wakachigaki = enabled;
+      if (enabled) {
+        el.wakachiOnBtn.className = 'py-2.5 px-3 rounded-xl bg-emerald-500 text-white border-2 border-emerald-500 text-sm font-black shadow-sm transition cursor-pointer';
+        el.wakachiOffBtn.className = 'py-2.5 px-3 rounded-xl bg-white hover:bg-emerald-100/70 text-slate-700 border-2 border-emerald-200 text-sm font-bold transition cursor-pointer';
+      } else {
+        el.wakachiOffBtn.className = 'py-2.5 px-3 rounded-xl bg-emerald-500 text-white border-2 border-emerald-500 text-sm font-black shadow-sm transition cursor-pointer';
+        el.wakachiOnBtn.className = 'py-2.5 px-3 rounded-xl bg-white hover:bg-emerald-100/70 text-slate-700 border-2 border-emerald-200 text-sm font-bold transition cursor-pointer';
+      }
+      convertAndRender();
+    }
+
+    el.wakachiOnBtn.addEventListener('click', () => setWakachigaki(true));
+    el.wakachiOffBtn.addEventListener('click', () => setWakachigaki(false));
+
+    // 3. むき（よこがき / たてがき）
+    function setDirection(dir) {
+      state.direction = dir;
+      if (dir === 'vertical') {
+        el.hiraganaOutput.classList.remove('writing-horizontal', 'w-full', 'text-center');
+        el.hiraganaOutput.classList.add('writing-vertical', 'h-[300px]', 'sm:h-[360px]', 'text-left', 'mx-auto');
+        el.hiraganaCard.classList.add('min-h-[360px]', 'sm:min-h-[420px]');
+
+        el.dirVerticalBtn.className = 'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-amber-400 text-slate-900 border-2 border-amber-500 text-sm font-black shadow-sm transition cursor-pointer';
+        el.dirHorizontalBtn.className = 'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-white hover:bg-amber-100/70 text-slate-700 border-2 border-amber-200 text-sm font-bold transition cursor-pointer';
+      } else {
+        el.hiraganaOutput.classList.remove('writing-vertical', 'h-[300px]', 'sm:h-[360px]', 'text-left', 'mx-auto');
+        el.hiraganaOutput.classList.add('writing-horizontal', 'w-full', 'text-center');
+        if (!state.isScreenshotMode) {
+          el.hiraganaCard.classList.remove('min-h-[360px]', 'sm:min-h-[420px]');
+        }
+
+        el.dirHorizontalBtn.className = 'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-amber-400 text-slate-900 border-2 border-amber-500 text-sm font-black shadow-sm transition cursor-pointer';
+        el.dirVerticalBtn.className = 'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-white hover:bg-amber-100/70 text-slate-700 border-2 border-amber-200 text-sm font-bold transition cursor-pointer';
+      }
+    }
+
+    el.dirHorizontalBtn.addEventListener('click', () => setDirection('horizontal'));
+    el.dirVerticalBtn.addEventListener('click', () => setDirection('vertical'));
+
+    // 4. かみの デザイン（まっしろ / こくごノート風 / かわいいわく）
+    function setPaperTheme(paper) {
+      state.paperTheme = paper;
+      el.hiraganaCard.classList.remove('paper-white', 'paper-notebook', 'paper-cute');
+      el.hiraganaCard.classList.add(`paper-${paper}`);
+
+      if (paper === 'cute') {
+        el.cuteDecorations.classList.remove('hidden');
+      } else {
+        el.cuteDecorations.classList.add('hidden');
+      }
+
+      el.paperBtns.forEach((btn) => {
+        if (btn.dataset.paper === paper) {
+          btn.className = 'paper-btn flex flex-col items-center justify-center gap-1 py-2 px-1.5 rounded-xl bg-pink-500 text-white border-2 border-pink-500 text-xs font-black shadow-sm transition cursor-pointer';
+        } else {
+          btn.className = 'paper-btn flex flex-col items-center justify-center gap-1 py-2 px-1.5 rounded-xl bg-white hover:bg-pink-100/60 text-slate-700 border-2 border-pink-200 text-xs font-bold transition cursor-pointer';
+        }
+      });
+    }
+
+    el.paperBtns.forEach((btn) => {
+      btn.addEventListener('click', () => setPaperTheme(btn.dataset.paper));
+    });
+
+    // ==========================================
+    // 9. スクショモード（周囲のUIを隠してカードだけ大きく表示）
+    // ==========================================
+    function toggleScreenshotMode(enable) {
+      state.isScreenshotMode = enable;
+      const hideTargets = [
+        el.header,
+        el.footer,
+        el.inputSection,
+        el.cardHeaderBar,
+        el.actionBar,
+        el.customizeSection
+      ];
+
+      if (enable) {
+        document.body.classList.add('screenshot-active');
+        hideTargets.forEach((target) => target.classList.add('hidden'));
+        el.screenshotExitBar.classList.remove('hidden');
+
+        el.main.classList.remove('py-5', 'sm:py-6', 'max-w-4xl');
+        el.main.classList.add('min-h-screen', 'justify-center', 'items-center', 'max-w-5xl', 'py-12');
+        el.hiraganaCard.classList.add('min-h-[360px]', 'sm:min-h-[440px]', 'shadow-xl');
+      } else {
+        document.body.classList.remove('screenshot-active');
+        hideTargets.forEach((target) => target.classList.remove('hidden'));
+        el.screenshotExitBar.classList.add('hidden');
+
+        el.main.classList.add('py-5', 'sm:py-6', 'max-w-4xl');
+        el.main.classList.remove('min-h-screen', 'justify-center', 'items-center', 'max-w-5xl', 'py-12');
+        if (state.direction === 'horizontal') {
+          el.hiraganaCard.classList.remove('min-h-[360px]', 'sm:min-h-[440px]');
+        }
+        el.hiraganaCard.classList.remove('shadow-xl');
+      }
+    }
+
+    el.screenshotModeBtn.addEventListener('click', () => toggleScreenshotMode(true));
+    el.exitScreenshotBtn.addEventListener('click', () => toggleScreenshotMode(false));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && state.isScreenshotMode) {
+        toggleScreenshotMode(false);
+      }
+    });
+
+    // ==========================================
+    // 10. 外部ライブラリ不要の自前 HTML5 <canvas> PNG画像保存エンジン
+    // ==========================================
+    function drawRoundedRectPath(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+    }
+
+    // かわいいわく用の装飾（星・ハート・花）をCanvasに描画
+    function drawCanvasStar(ctx, cx, cy, outerR, innerR, color) {
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const r = i % 2 === 0 ? outerR : innerR;
+        const angle = (Math.PI / 5) * i - Math.PI / 2;
+        const x = cx + Math.cos(angle) * r;
+        const y = cy + Math.sin(angle) * r;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawCanvasHeart(ctx, cx, cy, size, color) {
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.translate(cx, cy);
+      ctx.beginPath();
+      const topCurveHeight = size * 0.3;
+      ctx.moveTo(0, topCurveHeight);
+      ctx.bezierCurveTo(0, 0, -size / 2, 0, -size / 2, topCurveHeight);
+      ctx.bezierCurveTo(-size / 2, (size + topCurveHeight) / 2, 0, (size + topCurveHeight) / 1.3, 0, size);
+      ctx.bezierCurveTo(0, (size + topCurveHeight) / 1.3, size / 2, (size + topCurveHeight) / 2, size / 2, topCurveHeight);
+      ctx.bezierCurveTo(size / 2, 0, 0, 0, 0, topCurveHeight);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawCanvasFlower(ctx, cx, cy, petalR, color) {
+      ctx.save();
+      ctx.fillStyle = color;
+      const offsets = [[0, 0], [0, -petalR * 1.4], [0, petalR * 1.4], [-petalR * 1.4, 0], [petalR * 1.4, 0]];
+      for (const [dx, dy] of offsets) {
+        ctx.beginPath();
+        ctx.arc(cx + dx, cy + dy, petalR, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // 現在のひらがなカードデザインをそのまま高解像度PNG画像として生成・保存
+    function exportCardToPng() {
+      const text = el.hiraganaOutput.textContent.trim();
+      if (!text || text === 'ここに ひらがなが でるよ') {
+        showToast('ほぞんする ひらがなが ありません', 'warning');
+        return;
+      }
+
+      const scale = 2; // Retina高精細出力
+      const fontSize = state.fontSize * scale;
+      const fontFamily = '"BIZ UDPGothic", "Zen Maru Gothic", sans-serif';
+      const fontSpec = `700 ${fontSize}px ${fontFamily}`;
+
+      const tempCanvas = document.createElement('canvas');
+      const tempCtx = tempCanvas.getContext('2d');
+      tempCtx.font = fontSpec;
+
+      let canvasWidth = 1280;
+      let canvasHeight = 720;
+      const paddingX = 110;
+      const paddingY = 110;
+
+      if (state.direction === 'horizontal') {
+        // --- よこがきレイアウト計算（自動折り返し＋禁則処理） ---
+        const maxLineWidth = canvasWidth - paddingX * 2;
+        const rawLines = text.split('\n');
+        const wrappedLines = [];
+        const noStartChars = /^[、。！？!?,.\)）」』】]/;
+
+        for (const rawLine of rawLines) {
+          if (!rawLine) {
+            wrappedLines.push('');
+            continue;
+          }
+          let currentLine = '';
+          for (const char of rawLine) {
+            const testLine = currentLine + char;
+            const width = tempCtx.measureText(testLine).width;
+            if (width > maxLineWidth && currentLine.length > 0 && !noStartChars.test(char)) {
+              wrappedLines.push(currentLine);
+              currentLine = char;
+            } else {
+              currentLine = testLine;
+            }
+          }
+          if (currentLine) wrappedLines.push(currentLine);
+        }
+
+        const lineHeight = fontSize * 1.75;
+        const totalTextHeight = wrappedLines.length * lineHeight;
+        canvasHeight = Math.max(640, Math.ceil(totalTextHeight + paddingY * 2));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+        const ctx = canvas.getContext('2d');
+
+        // 背景と枠線の描画
+        drawCardBackgroundAndBorder(ctx, canvasWidth, canvasHeight);
+
+        // テキスト描画（上下左右中央揃え）
+        ctx.font = fontSpec;
+        ctx.fillStyle = '#0F172A';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const startY = (canvasHeight - totalTextHeight) / 2 + lineHeight / 2;
+        wrappedLines.forEach((line, idx) => {
+          ctx.fillText(line, canvasWidth / 2, startY + idx * lineHeight);
+        });
+
+        triggerPngDownload(canvas);
+
+      } else {
+        // --- たてがきレイアウト計算（右から左へ列進行） ---
+        const colHeight = 760;
+        canvasHeight = colHeight + paddingY * 2;
+        const charStep = fontSize * 1.15;
+        const colStep = fontSize * 1.85;
+        const maxCharsPerCol = Math.max(4, Math.floor(colHeight / charStep));
+
+        const rawLines = text.split('\n');
+        const columns = [];
+        const noStartChars = /^[、。！？!?,.\)）」』】]/;
+
+        for (const rawLine of rawLines) {
+          const chars = Array.from(rawLine);
+          if (chars.length === 0) {
+            columns.push([]);
+            continue;
+          }
+          let currentCol = [];
+          for (const ch of chars) {
+            if (currentCol.length >= maxCharsPerCol && !noStartChars.test(ch)) {
+              columns.push(currentCol);
+              currentCol = [ch];
+            } else {
+              currentCol.push(ch);
+            }
+          }
+          if (currentCol.length > 0) columns.push(currentCol);
+        }
+
+        const totalColsWidth = columns.length * colStep;
+        canvasWidth = Math.max(960, Math.ceil(totalColsWidth + paddingX * 2));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+        const ctx = canvas.getContext('2d');
+
+        // 背景と枠線の描画
+        drawCardBackgroundAndBorder(ctx, canvasWidth, canvasHeight);
+
+        // 縦書き文字描画
+        ctx.font = fontSpec;
+        ctx.fillStyle = '#0F172A';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const rightMostX = canvasWidth / 2 + totalColsWidth / 2 - colStep / 2;
+        const startY = paddingY + charStep / 2;
+        const smallKana = /^[ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮ]/;
+
+        columns.forEach((colChars, colIndex) => {
+          const cx = rightMostX - colIndex * colStep;
+          colChars.forEach((ch, rowIndex) => {
+            const cy = startY + rowIndex * charStep;
+            ctx.save();
+            ctx.translate(cx, cy);
+
+            if (ch === 'ー' || ch === '―' || ch === '～' || ch === '〜') {
+              // 長音符は90度回転して縦棒にする
+              ctx.rotate(Math.PI / 2);
+              ctx.fillText(ch, 0, 0);
+            } else if (ch === '、' || ch === '。') {
+              // 句読点はマスの右上に配置
+              ctx.fillText(ch, fontSize * 0.34, -fontSize * 0.34);
+            } else if (/^[「」『』（）()【】]/.test(ch)) {
+              // 括弧類は90度回転
+              ctx.rotate(Math.PI / 2);
+              ctx.fillText(ch, 0, 0);
+            } else if (smallKana.test(ch)) {
+              // 促音・拗音はやや右上に配置
+              ctx.fillText(ch, fontSize * 0.1, -fontSize * 0.08);
+            } else {
+              ctx.fillText(ch, 0, 0);
+            }
+
+            ctx.restore();
+          });
+        });
+
+        triggerPngDownload(canvas);
+      }
+    }
+
+    // かみのデザイン別の背景・枠線をCanvasに描画する共通ヘルパー
+    function drawCardBackgroundAndBorder(ctx, w, h) {
+      const margin = 16;
+      const radius = 44;
+
+      ctx.save();
+      drawRoundedRectPath(ctx, margin, margin, w - margin * 2, h - margin * 2, radius);
+      ctx.clip();
+
+      if (state.paperTheme === 'notebook') {
+        // こくごノート風（白ベース＋緑の方眼マス目とリーダー線）
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, w, h);
+
+        const cellSize = 96;
+        // 薄い十字リーダー線
+        ctx.strokeStyle = 'rgba(16, 185, 129, 0.16)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 6]);
+        for (let x = cellSize / 2; x < w; x += cellSize) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, h);
+          ctx.stroke();
+        }
+        for (let y = cellSize / 2; y < h; y += cellSize) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(w, y);
+          ctx.stroke();
+        }
+
+        // マス目の実線
+        ctx.setLineDash([]);
+        ctx.strokeStyle = 'rgba(16, 185, 129, 0.28)';
+        ctx.lineWidth = 2.5;
+        for (let x = 0; x < w; x += cellSize) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, h);
+          ctx.stroke();
+        }
+        for (let y = 0; y < h; y += cellSize) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(w, y);
+          ctx.stroke();
+        }
+
+        // 緑の外枠
+        drawRoundedRectPath(ctx, margin, margin, w - margin * 2, h - margin * 2, radius);
+        ctx.strokeStyle = '#34D399';
+        ctx.lineWidth = 10;
+        ctx.stroke();
+
+      } else if (state.paperTheme === 'cute') {
+        // かわいいわく（パステルグラデーション＋ピンク破線枠＋四隅イラスト）
+        const grad = ctx.createLinearGradient(0, 0, w, h);
+        grad.addColorStop(0, '#FFFBEB');
+        grad.addColorStop(0.5, '#FFF1F2');
+        grad.addColorStop(1, '#F0FDF4');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+
+        // 内側の白い角丸パネル
+        drawRoundedRectPath(ctx, margin + 22, margin + 22, w - (margin + 22) * 2, h - (margin + 22) * 2, radius - 12);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+        ctx.fill();
+
+        // ピンクの破線外枠
+        drawRoundedRectPath(ctx, margin + 6, margin + 6, w - (margin + 6) * 2, h - (margin + 6) * 2, radius);
+        ctx.strokeStyle = '#F472B6';
+        ctx.lineWidth = 10;
+        ctx.setLineDash([22, 14]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // 四隅の装飾イラスト
+        drawCanvasStar(ctx, 68, 68, 24, 11, '#FCD34D');
+        drawCanvasHeart(ctx, w - 68, 50, 34, '#F9A8D4');
+        drawCanvasFlower(ctx, 68, h - 68, 10, '#6EE7B7');
+        drawCanvasStar(ctx, w - 68, h - 68, 24, 11, '#7DD3FC');
+
+      } else {
+        // まっしろ
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, w, h);
+
+        drawRoundedRectPath(ctx, margin, margin, w - margin * 2, h - margin * 2, radius);
+        ctx.strokeStyle = '#CBD5E1';
+        ctx.lineWidth = 8;
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+
+    function triggerPngDownload(canvas) {
+      try {
+        const dataUrl = canvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        const now = new Date();
+        const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+        link.download = `hiragana-${ts}.png`;
+        link.href = dataUrl;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showToast('がぞうを ほぞんしたよ！', 'success');
+      } catch (e) {
+        showToast('がぞうの ほぞんに しっぱいしました', 'error');
+      }
+    }
+
+    el.saveImageBtn.addEventListener('click', exportCardToPng);
+
+    // ==========================================
+    // 11. 文字のクリップボードコピー
+    // ==========================================
+    el.copyTextBtn.addEventListener('click', () => {
+      const textToCopy = el.hiraganaOutput.textContent.trim();
+      if (!textToCopy || textToCopy === 'ここに ひらがなが でるよ') {
+        showToast('コピーする もじが ありません', 'warning');
+        return;
+      }
+
+      const tempTextarea = document.createElement('textarea');
+      tempTextarea.value = textToCopy;
+      tempTextarea.style.position = 'fixed';
+      tempTextarea.style.left = '-9999px';
+      document.body.appendChild(tempTextarea);
+      tempTextarea.select();
+
+      try {
+        document.execCommand('copy');
+        showToast('ひらがなを コピーしたよ！', 'success');
+      } catch (err) {
+        showToast('コピーに しっぱいしました', 'error');
+      } finally {
+        document.body.removeChild(tempTextarea);
+      }
+    });
+
+    // ==========================================
+    // 12. 起動時の初期化実行
+    // ==========================================
+    window.addEventListener('DOMContentLoaded', () => {
+      convertAndRender();
+      loadKuromojiDictionary();
+    });
+  </script>
+</body>
+</html>
